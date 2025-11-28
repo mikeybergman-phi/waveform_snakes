@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Snakes + Vortex + Ink + Ink-Worm Rings – Auto BPM Visualizer</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+      color: #eee;
+    }
+    #controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      padding: 10px 12px 8px 12px;
+      background: rgba(0, 0, 0, 0.78);
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      z-index: 10;
+      max-width: 320px;
+      font-size: 12px;
+      backdrop-filter: blur(8px);
+    }
+    #controls h1 {
+      font-size: 14px;
+      margin: 0 0 6px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    #controls .row {
+      margin-bottom: 6px;
+      display: flex;
+      flex-direction: column;
+    }
+    #controls label {
+      font-size: 11px;
+      margin-bottom: 2px;
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    #controls input[type="range"], #controls select { width: 100%; }
+    #controls button {
+      margin-top: 6px;
+      padding: 6px 8px;
+      background:#181818;
+      color:#eee;
+      border-radius:6px;
+      border:1px solid #555;
+      cursor:pointer;
+      font-size:11px;
+    }
+    #controls button:hover { background:#252525; }
+    #controls input[type="file"] {
+      margin-top:4px;
+      font-size:11px;
+    }
+    #hint {
+      font-size:10px;
+      opacity:0.8;
+      margin-top:4px;
+    }
+    #toggleControls {
+      width: 100%;
+      margin-top: 6px;
+      font-size: 11px;
+      opacity: 0.8;
+    }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h1>Waveform Snakes – Auto BPM 🌈</h1>
+
+    <button id="micBtn">Use Microphone</button>
+    <input id="fileInput" type="file" accept="audio/*">
+
+    <div id="hint">
+      Auto-beat from music (RMS-based).<br>
+      Choose effect below. Press <b>H</b> to hide/show this panel.
+    </div>
+
+    <div class="row">
+      <label><span>Effect</span></label>
+      <select id="effect">
+        <option value="snakes">Waveform Snakes</option>
+        <option value="vortex">Audio-Driven Vortex Fields</option>
+        <option value="ink">Ink in Water Plumes</option>
+        <option value="snakesInk">Snakes + Ink (Combo)</option>
+        <option value="rings">Inward Ink-Worm Rings</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label><span>Fade</span><span id="fadeVal"></span></label>
+      <input id="fade" type="range" min="0.85" max="0.99" step="0.005" value="0.90">
+    </div>
+
+    <div class="row">
+      <label><span>Max Wave / Arms / Detail</span><span id="complexVal"></span></label>
+      <input id="complex" type="range" min="1" max="60" step="1" value="30">
+    </div>
+
+    <div class="row">
+      <label><span>Beat Sensitivity</span><span id="sensVal"></span></label>
+      <input id="beatSens" type="range" min="0.001" max="0.15" step="0.001" value="0.005">
+    </div>
+
+    <div class="row">
+      <label><span>Audio Reactivity</span><span id="reactVal"></span></label>
+      <input id="react" type="range" min="0" max="2.0" step="0.1" value="2.0">
+    </div>
+
+    <div class="row">
+      <label><span>Rainbow Brightness → White (max)</span><span id="brightVal"></span></label>
+      <input id="bright" type="range" min="0" max="1" step="0.01" value="0.2">
+    </div>
+
+    <button id="toggleControls">Hide UI (H)</button>
+  </div>
+
+  <canvas id="c"></canvas>
+
+  <script>
+    // ---------- Canvas ----------
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    let width = window.innerWidth, height = window.innerHeight;
+    canvas.width = width; canvas.height = height;
+
+    window.addEventListener("resize", () => {
+      width = window.innerWidth; height = window.innerHeight;
+      canvas.width = width; canvas.height = height;
+    });
+
+    // ---------- UI ----------
+    const controlsEl     = document.getElementById("controls");
+    const toggleControlsBtn = document.getElementById("toggleControls");
+    const effectSelect   = document.getElementById("effect");
+
+    const fadeSlider     = document.getElementById("fade");
+    const complexSlider  = document.getElementById("complex");
+    const beatSensSlider = document.getElementById("beatSens");
+    const reactSlider    = document.getElementById("react");
+    const brightSlider   = document.getElementById("bright");
+
+    const fadeVal    = document.getElementById("fadeVal");
+    const complexVal = document.getElementById("complexVal");
+    const sensVal    = document.getElementById("sensVal");
+    const reactVal   = document.getElementById("reactVal");
+    const brightVal  = document.getElementById("brightVal");
+
+    let fadeSpeed       = parseFloat(fadeSlider.value);
+    let maxComplexity   = parseInt(complexSlider.value, 10);
+    let beatSensitivity = parseFloat(beatSensSlider.value);
+    let audioReactivity = parseFloat(reactSlider.value);
+    let rainbowBrightnessMax = parseFloat(brightSlider.value);
+    let controlsVisible = true;
+    let currentEffect   = effectSelect.value;
+
+    function refreshUI() {
+      fadeVal.textContent    = fadeSpeed.toFixed(3);
+      complexVal.textContent = maxComplexity.toString();
+      sensVal.textContent    = beatSensitivity.toFixed(3);
+      reactVal.textContent   = audioReactivity.toFixed(1);
+      brightVal.textContent  = rainbowBrightnessMax.toFixed(2);
+      toggleControlsBtn.textContent = controlsVisible ? "Hide UI (H)" : "Show UI (H)";
+    }
+
+    function updateControlsVisibility() {
+      controlsEl.style.display = controlsVisible ? "block" : "none";
+    }
+
+    fadeSlider.oninput     = () => { fadeSpeed       = parseFloat(fadeSlider.value);     refreshUI(); };
+    complexSlider.oninput  = () => { maxComplexity   = parseInt(complexSlider.value,10); refreshUI(); };
+    beatSensSlider.oninput = () => { beatSensitivity = parseFloat(beatSensSlider.value); refreshUI(); };
+    reactSlider.oninput    = () => { audioReactivity = parseFloat(reactSlider.value);    refreshUI(); };
+    brightSlider.oninput   = () => { rainbowBrightnessMax = parseFloat(brightSlider.value); refreshUI(); };
+
+    toggleControlsBtn.onclick = () => {
+      controlsVisible = !controlsVisible;
+      updateControlsVisibility();
+      if (controlsVisible) refreshUI();
+    };
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "h" || e.key === "H") {
+        controlsVisible = !controlsVisible;
+        updateControlsVisibility();
+        if (controlsVisible) refreshUI();
+      }
+    });
+
+    effectSelect.onchange = () => {
+      currentEffect = effectSelect.value;
+      loops.length = 0;
+      vortices.length = 0;
+      plumes.length = 0;
+      rings.length = 0;
+    };
+
+    refreshUI();
+
+    // ---------- Audio ----------
+    const micBtn   = document.getElementById("micBtn");
+    const fileInput = document.getElementById("fileInput");
+
+    let audioCtx = null;
+    let analyser = null;
+    let freqData = null;
+    let timeData = null;
+    let sourceNode = null;
+    let audioElement = null;
+    let audioFileSource = null;
+
+    function ensureAudioContext(){
+      if(!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    function resumeAudioContext(){
+      if(audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+    }
+
+    function setupAnalyser() {
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.7;
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+      timeData = new Uint8Array(analyser.fftSize);
+    }
+
+    micBtn.onclick = async () => {
+      ensureAudioContext();
+      resumeAudioContext();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        if(sourceNode) sourceNode.disconnect();
+        setupAnalyser();
+        sourceNode = audioCtx.createMediaStreamSource(stream);
+        sourceNode.connect(analyser);
+      } catch(e) {
+        console.error(e);
+        alert("Microphone error / permission denied.");
+      }
+    };
+
+    fileInput.onchange = e => {
+      const file = e.target.files[0];
+      if(!file) return;
+
+      ensureAudioContext();
+      resumeAudioContext();
+
+      if(audioElement) {
+        audioElement.pause();
+        audioElement = null;
+      }
+
+      audioElement = new Audio(URL.createObjectURL(file));
+      audioElement.loop = true;
+      audioElement.crossOrigin = "anonymous";
+
+      audioElement.addEventListener("play", () => {
+        resumeAudioContext();
+      });
+
+      audioElement.play().catch(err => {
+        console.warn("Autoplay blocked; click the browser's play button if shown.", err);
+      });
+
+      if(sourceNode)      sourceNode.disconnect();
+      if(audioFileSource) audioFileSource.disconnect();
+
+      setupAnalyser();
+      audioFileSource = audioCtx.createMediaElementSource(audioElement);
+      audioFileSource.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    };
+
+    // ---------- Audio metrics & beat detection ----------
+    let smoothRms = 0;
+    let lastBeatTime = 0;
+    const beatTimes = [];
+
+    function getAudioMetrics(t) {
+      if(!analyser || !freqData || !timeData) {
+        const fake = 0.25 + 0.15 * Math.sin(t * 0.6);
+        return { energy: fake, rms: fake, silent: true };
+      }
+
+      analyser.getByteFrequencyData(freqData);
+      analyser.getByteTimeDomainData(timeData);
+
+      const lenFreq = freqData.length;
+      const lenTime = timeData.length;
+
+      let freqSum = 0;
+      let freqNonZero = 0;
+      for(let i = 0; i < lenFreq; i++) {
+        const v = freqData[i];
+        freqSum += v;
+        if(v > 0) freqNonZero++;
+      }
+
+      let sumSq = 0;
+      for(let i = 0; i < lenTime; i++) {
+        const centered = (timeData[i] - 128) / 128;
+        sumSq += centered * centered;
+      }
+      const rms = Math.sqrt(sumSq / (lenTime || 1));
+
+      const allZero = (freqNonZero === 0 || freqSum === 0);
+      const silent = allZero || rms < 0.003;
+
+      if(silent) {
+        const fake = 0.25 + 0.15 * Math.sin(t * 0.6);
+        return { energy: fake, rms: fake, silent: true };
+      }
+
+      const start = Math.floor(lenFreq * 0.08);
+      const end   = Math.floor(lenFreq * 0.8);
+      let bandSum = 0;
+      for(let i = start; i < end; i++) {
+        bandSum += freqData[i];
+      }
+      const avgBand = bandSum / (end - start || 1);
+      const energy = Math.max(0.02, avgBand / 255);
+
+      return { energy, rms, silent: false };
+    }
+
+    function detectBeat(t, rms, silent) {
+      if(silent) {
+        const fakeInterval = 60 / 60;
+        if(t - lastBeatTime > fakeInterval) {
+          lastBeatTime = t;
+          beatTimes.push(t);
+          if(beatTimes.length > 12) beatTimes.shift();
+          return true;
+        }
+        return false;
+      }
+
+      smoothRms = smoothRms * 0.9 + rms * 0.1;
+      const delta = rms - smoothRms;
+
+      const minInterval = 0.18;
+      if(delta > beatSensitivity && (t - lastBeatTime) > minInterval) {
+        lastBeatTime = t;
+        beatTimes.push(t);
+        if(beatTimes.length > 16) beatTimes.shift();
+        return true;
+      }
+      return false;
+    }
+
+    // ---------- Waveform Snakes ----------
+    const loops = [];
+    let globalHue = 0;
+
+    function spawnLoop(energy) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+
+      const intensity = 0.25 + 0.5 * Math.random() + audioReactivity * 0.6 * energy;
+      const baseRadius = 20 + Math.random() * Math.min(width, height) * 0.18;
+      const freq = Math.max(1, Math.floor(1 + Math.random() * Math.max(1, maxComplexity)));
+      const brightness = rainbowBrightnessMax * Math.random();
+
+      loops.push({
+        x,
+        y,
+        baseRadius,
+        radius: baseRadius,
+        growth: 60 + intensity * 260,
+        amp: 0.04 + intensity * 0.24,
+        freq,
+        phase: Math.random() * Math.PI * 2,
+        phaseSpeed: (Math.random() < 0.5 ? -1 : 1) * (0.7 + intensity * 3.0),
+        hueBase: (globalHue + Math.random() * 180) % 360,
+        alpha: 0.4 + intensity * 0.6,
+        thickness: 0.8 + intensity * 3.0,
+        brightness
+      });
+
+      globalHue = (globalHue + 22 + intensity * 88) % 360;
+    }
+
+    function drawLoop(L) {
+      const segments = 260;
+      const twoPI = Math.PI * 2;
+      let px = null, py = null;
+
+      const b = L.brightness || 0;
+
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const theta = t * twoPI;
+
+        const wobble = 1 + L.amp * Math.sin(theta * L.freq + L.phase);
+        const r = L.radius * wobble;
+
+        const x = L.x + r * Math.cos(theta);
+        const y = L.y + r * Math.sin(theta);
+
+        if (px !== null) {
+          const hue = (L.hueBase + t * 360) % 360;
+          const baseLight = 45 + 25 * L.amp * 4;
+
+          const sat = Math.max(0, 100 - b * 100);
+          const light = baseLight + b * (100 - baseLight);
+
+          ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${L.alpha})`;
+          ctx.lineWidth = L.thickness;
+
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+
+        px = x;
+        py = y;
+      }
+    }
+
+    function updateAndDrawSnakes(dt) {
+      for (let i = loops.length - 1; i >= 0; i--) {
+        const L = loops[i];
+        L.radius += L.growth * dt;
+        L.phase  += L.phaseSpeed * dt;
+        L.alpha  *= 0.978;
+
+        if (L.alpha < 0.02 || L.radius > Math.max(width, height) * 2) {
+          loops.splice(i, 1);
+          continue;
+        }
+        drawLoop(L);
+      }
+    }
+
+    // ---------- Vortex Fields ----------
+    const vortices = [];
+
+    function spawnVortex(energy) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+
+      const strength = 0.6 + audioReactivity * energy * 2.5;
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      const maxR = Math.min(width, height) * (0.25 + 0.25 * Math.random());
+      const b = rainbowBrightnessMax * Math.random();
+
+      vortices.push({
+        x,
+        y,
+        radius: 20,
+        maxRadius: maxR,
+        growth: 40 + strength * 120,
+        twist: 4 + strength * 10,
+        dir,
+        phase: Math.random() * Math.PI * 2,
+        phaseSpeed: (0.4 + strength * 2.2) * dir,
+        hueBase: (globalHue + Math.random() * 180) % 360,
+        alpha: 0.5 + energy * 0.4,
+        thickness: 0.7 + strength * 1.8,
+        brightness: b
+      });
+
+      globalHue = (globalHue + 40 + strength * 80) % 360;
+    }
+
+    function drawVortex(V) {
+      const arms = Math.max(3, Math.round(maxComplexity / 2));
+      const steps = 40;
+      const twoPI = Math.PI * 2;
+      const b = V.brightness || 0;
+
+      const baseLight = 65;
+      const sat = Math.max(0, 100 - b * 100);
+      const light = baseLight + b * (100 - baseLight);
+
+      ctx.lineWidth = V.thickness;
+
+      for (let a = 0; a < arms; a++) {
+        const baseAngle = (a / arms) * twoPI;
+        let px = null, py = null;
+
+        for (let s = 0; s <= steps; s++) {
+          const f = s / steps;
+          const r = V.radius * (0.1 + 0.9 * f);
+          const angle = baseAngle + V.twist * f + V.phase;
+
+          const x = V.x + r * Math.cos(angle);
+          const y = V.y + r * Math.sin(angle);
+
+          if (px !== null) {
+            const hue = (V.hueBase + f * 360) % 360;
+            ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${V.alpha})`;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+
+          px = x;
+          py = y;
+        }
+      }
+    }
+
+    function updateAndDrawVortices(dt) {
+      for (let i = vortices.length - 1; i >= 0; i--) {
+        const V = vortices[i];
+
+        V.radius += V.growth * dt;
+        V.phase  += V.phaseSpeed * dt;
+        V.alpha  *= 0.978;
+
+        if (V.alpha < 0.02 || V.radius > V.maxRadius) {
+          vortices.splice(i, 1);
+          continue;
+        }
+
+        drawVortex(V);
+      }
+    }
+
+    // ---------- Ink Plumes ----------
+    const plumes = [];
+
+    function spawnPlume(energy) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+
+      const intensity = 0.3 + audioReactivity * 0.7 * energy;
+      const minDim = Math.min(width, height);
+
+      const baseRadius = 40 + Math.random() * minDim * 0.15;
+      const growth = 30 + intensity * 180;
+
+      const darkness = 0.65 + Math.random() * 0.3;
+      const upward = - (10 + 80 * intensity);
+      const sideways = (Math.random() - 0.5) * 40;
+
+      const layers = 8 + Math.floor(maxComplexity / 4);
+
+      const brightness = rainbowBrightnessMax * Math.random();
+      const colorMode = Math.random() < 0.5 ? "mono" : "rainbow";
+
+      plumes.push({
+        x,
+        y,
+        vx: sideways,
+        vy: upward,
+        radius: baseRadius,
+        growth,
+        alpha: 0.5 + energy * 0.25,
+        darkness,
+        layers,
+        hueBase: (globalHue + Math.random() * 120) % 360,
+        brightness,
+        colorMode,
+        noisePhase: Math.random() * Math.PI * 2
+      });
+
+      globalHue = (globalHue + 25 + intensity * 70) % 360;
+    }
+
+    function drawPlume(P) {
+      const layers = Math.max(4, P.layers);
+      const baseR = P.radius;
+
+      const prevComp = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let i = 0; i < layers; i++) {
+        const f = i / (layers - 1);
+        const r = baseR * (0.2 + 0.9 * f);
+
+        const b = P.brightness || 0;
+        const alphaLayer = P.alpha * Math.pow(1 - f, 1.5) * (0.25 + 0.25 * b);
+        if (alphaLayer < 0.01) continue;
+
+        const wobbleAngle = P.noisePhase + f * 6.28;
+        const wobbleMag   = baseR * 0.08 * (1 - f);
+        const dx = Math.cos(wobbleAngle) * wobbleMag;
+        const dy = Math.sin(wobbleAngle) * wobbleMag;
+
+        let hue, sat, light;
+        if (P.colorMode === "mono") {
+          hue = (P.hueBase + 220) % 360;
+          sat = 20 + b * 35;
+          light = 12 + (1 - P.darkness) * 25 + b * 35;
+        } else {
+          hue = (P.hueBase + f * 140) % 360;
+          sat = 40 + b * 45;
+          light = 18 + (1 - P.darkness) * 30 + b * 40;
+        }
+        if (light > 88) light = 88;
+
+        ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alphaLayer})`;
+        ctx.beginPath();
+        ctx.arc(P.x + dx, P.y + dy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = prevComp;
+    }
+
+    function updateAndDrawPlumes(dt) {
+      for (let i = plumes.length - 1; i >= 0; i--) {
+        const P = plumes[i];
+
+        P.radius += P.growth * dt;
+        P.x += P.vx * dt;
+        P.y += P.vy * dt;
+        P.alpha *= 0.975;
+        P.noisePhase += dt * 0.7;
+
+        if (
+          P.alpha < 0.02 ||
+          P.radius > Math.max(width, height) * 1.8 ||
+          P.y < -Math.max(width, height) * 0.5
+        ) {
+          plumes.splice(i, 1);
+          continue;
+        }
+
+        drawPlume(P);
+      }
+    }
+
+    // ---------- Ink-Worm Rings (faster to center, a bit of white allowed) ----------
+    const rings = [];
+
+    function spawnRing(energy) {
+      const margin = 50;
+      const cx = width / 2;
+      const cy = height / 2;
+
+      const side = Math.floor(Math.random() * 4);
+      let x, y;
+
+      if (side === 0) { x = -margin;        y = Math.random() * height; }
+      else if (side === 1) { x = width + margin; y = Math.random() * height; }
+      else if (side === 2) { x = Math.random() * width; y = -margin; }
+      else { x = Math.random() * width; y = height + margin; }
+
+      const dx = cx - x;
+      const dy = cy - y;
+      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+
+      // FASTER inward
+      const baseSpeed = 260 + energy * 520 * audioReactivity;
+      const vx = (dx / dist) * baseSpeed;
+      const vy = (dy / dist) * baseSpeed;
+
+      const complexityNorm = maxComplexity / 60; // 0–1
+      const baseBlobRadius = 10 + 20 * complexityNorm;
+      const wiggleStrength = 1.0 + 2.2 * complexityNorm; // bigger wiggle
+
+      const trailMax = 30 + Math.floor(maxComplexity * 3);
+
+      const brightness = rainbowBrightnessMax * (0.7 + Math.random() * 0.3);
+
+      let alphaStart = 0.75 + energy * 0.15;
+      if (alphaStart > 0.9) alphaStart = 0.9;
+
+      rings.push({
+        x,
+        y,
+        vx,
+        vy,
+        alpha: alphaStart,
+        hueBase: (globalHue + Math.random() * 180) % 360,
+        baseBlobRadius,
+        wiggleStrength,
+        brightness,
+        trail: [],
+        trailMax,
+      });
+
+      globalHue = (globalHue + 30 + energy * 90) % 360;
+    }
+
+    function drawRing(R) {
+      if (R.trail.length < 2) return;
+
+      // Additive blend for little white kisses
+      const prevComp = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = "lighter";
+
+      const n = R.trail.length;
+      for (let i = 0; i < n; i++) {
+        const p = R.trail[i];
+        const t = i / Math.max(1, n - 1);
+        const life = p.life;
+
+        const hue = (R.hueBase + t * 160) % 360;
+        const b = R.brightness || 0.4;
+        const sat = 55 + 35 * b;
+        let light = 24 + 30 * b * (1 - 0.4 * t); // fairly bright
+        if (light > 75) light = 75;             // allow near-white but not full
+
+        const r = R.baseBlobRadius * (0.55 + 0.9 * (1 - t)) * (0.6 + 0.4 * life);
+        const alpha = R.alpha * life * (0.18 + 0.22 * (1 - t)); // modest alpha
+
+        ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = prevComp;
+    }
+
+    function updateAndDrawRings(dt) {
+      const cx = width / 2;
+      const cy = height / 2;
+
+      for (let i = rings.length - 1; i >= 0; i--) {
+        const R = rings[i];
+
+        const dx = cx - R.x;
+        const dy = cy - R.y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        const dirX = dx / dist;
+        const dirY = dy / dist;
+
+        // stronger, faster steering/wiggle
+        const wiggleAngle = (Math.random() - 0.5) * R.wiggleStrength;
+        const cosA = Math.cos(wiggleAngle);
+        const sinA = Math.sin(wiggleAngle);
+        const wx = dirX * cosA - dirY * sinA;
+        const wy = dirX * sinA + dirY * cosA;
+
+        const speed = Math.sqrt(R.vx*R.vx + R.vy*R.vy) || 1;
+        const follow = 11 * dt;
+        R.vx = R.vx * (1 - follow) + wx * speed * follow;
+        R.vy = R.vy * (1 - follow) + wy * speed * follow;
+
+        R.x += R.vx * dt;
+        R.y += R.vy * dt;
+
+        R.trail.push({ x: R.x, y: R.y, life: 1.0 });
+        if (R.trail.length > R.trailMax) {
+          R.trail.shift();
+        }
+
+        // slower fade so they reach the center
+        for (let j = 0; j < R.trail.length; j++) {
+          R.trail[j].life *= 0.97;
+        }
+
+        R.alpha *= 0.985;
+
+        const centerDist = Math.sqrt((R.x - cx)**2 + (R.y - cy)**2);
+
+        if (R.alpha < 0.02 || centerDist < 5) {
+          rings.splice(i, 1);
+          continue;
+        }
+
+        drawRing(R);
+      }
+    }
+
+    // ---------- Main loop ----------
+    let lastTime = performance.now();
+
+    function frame(now) {
+      const t  = now / 1000;
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      const { energy, rms, silent } = getAudioMetrics(t);
+
+      ctx.fillStyle = `rgba(0,0,0,${1 - fadeSpeed})`;
+      ctx.fillRect(0, 0, width, height);
+
+      const beat = detectBeat(t, rms, silent);
+      if (beat) {
+        if (currentEffect === "snakes") {
+          spawnLoop(energy);
+        } else if (currentEffect === "vortex") {
+          spawnVortex(energy);
+        } else if (currentEffect === "ink") {
+          spawnPlume(energy);
+        } else if (currentEffect === "snakesInk") {
+          spawnLoop(energy);
+          spawnPlume(energy);
+        } else if (currentEffect === "rings") {
+          if (rings.length < 220) {
+            const baseCount = 7;
+            const extra = Math.floor(energy * 4);
+            const count = baseCount + extra;
+            for (let k = 0; k < count; k++) {
+              spawnRing(energy);
+            }
+          }
+        }
+      }
+
+      if (currentEffect === "snakes") {
+        updateAndDrawSnakes(dt);
+      } else if (currentEffect === "vortex") {
+        updateAndDrawVortices(dt);
+      } else if (currentEffect === "ink") {
+        updateAndDrawPlumes(dt);
+      } else if (currentEffect === "snakesInk") {
+        updateAndDrawPlumes(dt);
+        updateAndDrawSnakes(dt);
+      } else if (currentEffect === "rings") {
+        updateAndDrawRings(dt);
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, width, height);
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
+
+
