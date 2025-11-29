@@ -1,0 +1,1474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Snakes + Vortex + Ink + Rings + Smoke Fluid + KH Street – Auto BPM Visualizer</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+      color: #eee;
+    }
+    #controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      padding: 10px 12px 8px 12px;
+      background: rgba(0, 0, 0, 0.78);
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      z-index: 10;
+      max-width: 360px;
+      font-size: 12px;
+      backdrop-filter: blur(8px);
+    }
+    #controls h1 {
+      font-size: 14px;
+      margin: 0 0 6px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    #controls .row {
+      margin-bottom: 6px;
+      display: flex;
+      flex-direction: column;
+    }
+    #controls label {
+      font-size: 11px;
+      margin-bottom: 2px;
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    #controls input[type="range"], #controls select { width: 100%; }
+    #controls button {
+      margin-top: 6px;
+      padding: 6px 8px;
+      background:#181818;
+      color:#eee;
+      border-radius:6px;
+      border:1px solid #555;
+      cursor:pointer;
+      font-size:11px;
+    }
+    #controls button:hover { background:#252525; }
+    #controls input[type="file"] {
+      margin-top:4px;
+      font-size:11px;
+    }
+    #hint {
+      font-size:10px;
+      opacity:0.8;
+      margin-top:4px;
+    }
+    #toggleControls {
+      width: 100%;
+      margin-top: 6px;
+      font-size: 11px;
+      opacity: 0.8;
+    }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h1>Waveform Snakes – Auto BPM 🌈</h1>
+
+    <button id="micBtn">Use Microphone</button>
+    <input id="fileInput" type="file" accept="audio/*">
+
+    <div id="hint">
+      Auto-beat from music (RMS-based).<br>
+      Choose effect below. Press <b>H</b> to hide/show this panel.
+    </div>
+
+    <div class="row">
+      <label><span>Effect</span></label>
+      <select id="effect">
+        <option value="snakes">Waveform Snakes</option>
+        <option value="vortex">Audio-Driven Vortex Fields</option>
+        <option value="ink">Ink in Water Plumes</option>
+        <option value="snakesInk">Snakes + Ink (Combo)</option>
+        <option value="rings">Inward Ink-Worm Rings</option>
+        <option value="smokeFluid">Smoke Rings + Curtains (Dual Fluid)</option>
+        <option value="khStreet">Kelvin–Helmholtz Vortex Street</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label><span>Fade</span><span id="fadeVal"></span></label>
+      <input id="fade" type="range" min="0.85" max="0.99" step="0.005" value="0.92">
+    </div>
+
+    <div class="row">
+      <label><span>Max Wave / Arms / Detail</span><span id="complexVal"></span></label>
+      <input id="complex" type="range" min="1" max="60" step="1" value="30">
+    </div>
+
+    <div class="row">
+      <label><span>Beat Sensitivity</span><span id="sensVal"></span></label>
+      <input id="beatSens" type="range" min="0.001" max="0.15" step="0.001" value="0.005">
+    </div>
+
+    <div class="row">
+      <label><span>Audio Reactivity</span><span id="reactVal"></span></label>
+      <input id="react" type="range" min="0" max="2.0" step="0.1" value="2.0">
+    </div>
+
+    <div class="row">
+      <label><span>Rainbow Brightness → White (max)</span><span id="brightVal"></span></label>
+      <input id="bright" type="range" min="0" max="1" step="0.01" value="0.5">
+    </div>
+
+    <div class="row">
+      <label><span>Auto Cycle on Timer</span></label>
+      <label style="align-items:center; gap:6px;">
+        <input type="checkbox" id="autoCycle" checked>
+        <span style="font-size:11px; opacity:0.8;">Step to next effect every 60s</span>
+      </label>
+    </div>
+
+    <button id="toggleControls">Hide UI (H)</button>
+  </div>
+
+  <canvas id="c"></canvas>
+
+  <script>
+    // ---------- Main canvas ----------
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    let width = window.innerWidth, height = window.innerHeight;
+    canvas.width = width; canvas.height = height;
+
+    // ---------- Dual-fluid offscreen canvases (for smokeFluid effect) ----------
+    const deepCanvas = document.createElement("canvas");
+    const deepCtx = deepCanvas.getContext("2d");
+    deepCanvas.width = width;
+    deepCanvas.height = height;
+
+    const surfCanvas = document.createElement("canvas");
+    const surfCtx = surfCanvas.getContext("2d");
+    surfCanvas.width = width;
+    surfCanvas.height = height;
+
+    const deepTempCanvas = document.createElement("canvas");
+    const deepTempCtx = deepTempCanvas.getContext("2d");
+    deepTempCanvas.width = width;
+    deepTempCanvas.height = height;
+
+    window.addEventListener("resize", () => {
+      width = window.innerWidth; height = window.innerHeight;
+      canvas.width = width; canvas.height = height;
+      deepCanvas.width = width;
+      deepCanvas.height = height;
+      surfCanvas.width = width;
+      surfCanvas.height = height;
+      deepTempCanvas.width = width;
+      deepTempCanvas.height = height;
+    });
+
+    // ---------- Effect state arrays ----------
+    let loops       = [];
+    let vortices    = [];
+    let plumes      = [];
+    let rings       = [];
+    let smokeRings  = [];
+    let curtains    = [];
+    let khVortices  = [];
+    let khParticles = [];
+
+    let globalHue  = 0;
+    let deepPhase  = 0;
+    let khPhase    = 0;
+    let smokeSeeded = false;
+
+    // ---------- UI ----------
+    const controlsEl     = document.getElementById("controls");
+    const toggleControlsBtn = document.getElementById("toggleControls");
+    const effectSelect   = document.getElementById("effect");
+
+    const fadeSlider     = document.getElementById("fade");
+    const complexSlider  = document.getElementById("complex");
+    const beatSensSlider = document.getElementById("beatSens");
+    const reactSlider    = document.getElementById("react");
+    const brightSlider   = document.getElementById("bright");
+    const autoCycleCheckbox = document.getElementById("autoCycle");
+
+    const fadeVal    = document.getElementById("fadeVal");
+    const complexVal = document.getElementById("complexVal");
+    const sensVal    = document.getElementById("sensVal");
+    const reactVal   = document.getElementById("reactVal");
+    const brightVal  = document.getElementById("brightVal");
+
+    let fadeSpeed       = parseFloat(fadeSlider.value);
+    let maxComplexity   = parseInt(complexSlider.value, 10);
+    let beatSensitivity = parseFloat(beatSensSlider.value);
+    let audioReactivity = parseFloat(reactSlider.value);
+    let rainbowBrightnessMax = parseFloat(brightSlider.value);
+    let controlsVisible = true;
+    let currentEffect   = effectSelect.value;
+    let autoCycleEnabled = autoCycleCheckbox.checked;
+
+    function refreshUI() {
+      fadeVal.textContent    = fadeSpeed.toFixed(3);
+      complexVal.textContent = maxComplexity.toString();
+      sensVal.textContent    = beatSensitivity.toFixed(3);
+      reactVal.textContent   = audioReactivity.toFixed(1);
+      brightVal.textContent  = rainbowBrightnessMax.toFixed(2);
+      toggleControlsBtn.textContent = controlsVisible ? "Hide UI (H)" : "Show UI (H)";
+    }
+
+    function updateControlsVisibility() {
+      controlsEl.style.display = controlsVisible ? "block" : "none";
+    }
+
+    fadeSlider.oninput     = () => { fadeSpeed       = parseFloat(fadeSlider.value);     refreshUI(); };
+    complexSlider.oninput  = () => { maxComplexity   = parseInt(complexSlider.value,10); refreshUI(); };
+    beatSensSlider.oninput = () => { beatSensitivity = parseFloat(beatSensSlider.value); refreshUI(); };
+    reactSlider.oninput    = () => { audioReactivity = parseFloat(reactSlider.value);    refreshUI(); };
+    brightSlider.oninput   = () => { rainbowBrightnessMax = parseFloat(brightSlider.value); refreshUI(); };
+    autoCycleCheckbox.onchange = () => {
+      autoCycleEnabled = autoCycleCheckbox.checked;
+    };
+
+    toggleControlsBtn.onclick = () => {
+      controlsVisible = !controlsVisible;
+      updateControlsVisibility();
+      if (controlsVisible) refreshUI();
+    };
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "h" || e.key === "H") {
+        controlsVisible = !controlsVisible;
+        updateControlsVisibility();
+        if (controlsVisible) refreshUI();
+      }
+    });
+
+    // Auto-cycling config – purely time-based now
+    const effectOrder = [
+      "snakes",
+      "vortex",
+      "ink",
+      "snakesInk",
+      "rings",
+      "smokeFluid",
+      "khStreet"
+    ];
+    let lastEffectChangeTime = 0;
+    const cycleInterval = 60.0; // seconds
+
+    function clearAllEffects() {
+      loops.length       = 0;
+      vortices.length    = 0;
+      plumes.length      = 0;
+      rings.length       = 0;
+      smokeRings.length  = 0;
+      curtains.length    = 0;
+      khVortices.length  = 0;
+      khParticles.length = 0;
+      deepCtx.clearRect(0, 0, width, height);
+      surfCtx.clearRect(0, 0, width, height);
+    }
+
+    function setEffect(name) {
+      currentEffect = name;
+      effectSelect.value = name;
+
+      clearAllEffects();
+
+      if (currentEffect === "smokeFluid" && !smokeSeeded) {
+        seedSmokeDemo();
+        smokeSeeded = true;
+      }
+      if (currentEffect === "khStreet") {
+        initKHVortexStreet();
+      }
+
+      lastEffectChangeTime = performance.now() / 1000;
+    }
+
+    effectSelect.onchange = () => {
+      setEffect(effectSelect.value);
+    };
+
+    refreshUI();
+
+    // ---------- Audio ----------
+    const micBtn   = document.getElementById("micBtn");
+    const fileInput = document.getElementById("fileInput");
+
+    let audioCtx = null;
+    let analyser = null;
+    let freqData = null;
+    let timeData = null;
+    let sourceNode = null;
+    let audioElement = null;
+    let audioFileSource = null;
+
+    function ensureAudioContext(){
+      if(!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    function resumeAudioContext(){
+      if(audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+    }
+
+    function setupAnalyser() {
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.7;
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+      timeData = new Uint8Array(analyser.fftSize);
+    }
+
+    micBtn.onclick = async () => {
+      ensureAudioContext();
+      resumeAudioContext();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        if(sourceNode) sourceNode.disconnect();
+        setupAnalyser();
+        sourceNode = audioCtx.createMediaStreamSource(stream);
+        sourceNode.connect(analyser);
+      } catch(e) {
+        console.error(e);
+        alert("Microphone error / permission denied.");
+      }
+    };
+
+    fileInput.onchange = e => {
+      const file = e.target.files[0];
+      if(!file) return;
+
+      ensureAudioContext();
+      resumeAudioContext();
+
+      if(audioElement) {
+        audioElement.pause();
+        audioElement = null;
+      }
+
+      audioElement = new Audio(URL.createObjectURL(file));
+      audioElement.loop = true;
+      audioElement.crossOrigin = "anonymous";
+
+      audioElement.addEventListener("play", () => {
+        resumeAudioContext();
+      });
+
+      audioElement.play().catch(err => {
+        console.warn("Autoplay blocked; click the browser's play button if shown.", err);
+      });
+
+      if(sourceNode)      sourceNode.disconnect();
+      if(audioFileSource) audioFileSource.disconnect();
+
+      setupAnalyser();
+      audioFileSource = audioCtx.createMediaElementSource(audioElement);
+      audioFileSource.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    };
+
+    // ---------- Audio metrics & beat detection ----------
+    let smoothRms = 0;
+    let lastBeatTime = 0;
+    const beatTimes = [];
+
+    function getAudioMetrics(t) {
+      if(!analyser || !freqData || !timeData) {
+        const fake = 0.25 + 0.15 * Math.sin(t * 0.6);
+        return {
+          energy: fake,
+          rms: fake,
+          silent: true,
+          bass: fake,
+          mid: fake,
+          high: fake
+        };
+      }
+
+      analyser.getByteFrequencyData(freqData);
+      analyser.getByteTimeDomainData(timeData);
+
+      const lenFreq = freqData.length;
+      const lenTime = timeData.length;
+
+      let freqSum = 0;
+      let freqNonZero = 0;
+      for(let i = 0; i < lenFreq; i++) {
+        const v = freqData[i];
+        freqSum += v;
+        if(v > 0) freqNonZero++;
+      }
+
+      // bands
+      const bassEnd = Math.floor(lenFreq / 8);
+      const midEnd  = Math.floor(lenFreq * 3 / 8);
+      const highEnd = Math.floor(lenFreq * 7 / 8);
+
+      let b = 0, m = 0, h = 0, bc = 0, mc = 0, hc = 0;
+      for (let i = 0; i < lenFreq; i++) {
+        const v = freqData[i] / 255;
+        if (i < bassEnd) {
+          b += v; bc++;
+        } else if (i < midEnd) {
+          m += v; mc++;
+        } else if (i < highEnd) {
+          h += v; hc++;
+        }
+      }
+      const bass = bc ? b / bc : 0;
+      const mid  = mc ? m / mc : 0;
+      const high = hc ? h / hc : 0;
+
+      let sumSq = 0;
+      for(let i = 0; i < lenTime; i++) {
+        const centered = (timeData[i] - 128) / 128;
+        sumSq += centered * centered;
+      }
+      const rms = Math.sqrt(sumSq / (lenTime || 1));
+
+      const allZero = (freqNonZero === 0 || freqSum === 0);
+      const silent = allZero || rms < 0.003;
+
+      if(silent) {
+        const fake = 0.25 + 0.15 * Math.sin(t * 0.6);
+        return {
+          energy: fake,
+          rms: fake,
+          silent: true,
+          bass: fake,
+          mid: fake,
+          high: fake
+        };
+      }
+
+      const start = Math.floor(lenFreq * 0.08);
+      const end   = Math.floor(lenFreq * 0.8);
+      let bandSum = 0;
+      for(let i = start; i < end; i++) {
+        bandSum += freqData[i];
+      }
+      const avgBand = bandSum / (end - start || 1);
+      const energy = Math.max(0.02, avgBand / 255);
+
+      return { energy, rms, silent: false, bass, mid, high };
+    }
+
+    function detectBeat(t, rms, silent) {
+      if(silent) {
+        const fakeInterval = 60 / 60;
+        if(t - lastBeatTime > fakeInterval) {
+          lastBeatTime = t;
+          beatTimes.push(t);
+          if(beatTimes.length > 12) beatTimes.shift();
+          return true;
+        }
+        return false;
+      }
+
+      smoothRms = smoothRms * 0.9 + rms * 0.1;
+      const delta = rms - smoothRms;
+
+      const minInterval = 0.18;
+      if(delta > beatSensitivity && (t - lastBeatTime) > minInterval) {
+        lastBeatTime = t;
+        beatTimes.push(t);
+        if(beatTimes.length > 16) beatTimes.shift();
+        return true;
+      }
+      return false;
+    }
+
+    // ---------- Waveform Snakes ----------
+    function spawnLoop(energy) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+
+      const intensity = 0.25 + 0.5 * Math.random() + audioReactivity * 0.6 * energy;
+      const baseRadius = 20 + Math.random() * Math.min(width, height) * 0.18;
+      const freq = Math.max(1, Math.floor(1 + Math.random() * Math.max(1, maxComplexity)));
+      const brightness = rainbowBrightnessMax * Math.random();
+
+      loops.push({
+        x,
+        y,
+        baseRadius,
+        radius: baseRadius,
+        growth: 60 + intensity * 260,
+        amp: 0.04 + intensity * 0.24,
+        freq,
+        phase: Math.random() * Math.PI * 2,
+        phaseSpeed: (Math.random() < 0.5 ? -1 : 1) * (0.7 + intensity * 3.0),
+        hueBase: (globalHue + Math.random() * 180) % 360,
+        alpha: 0.4 + intensity * 0.6,
+        thickness: 0.8 + intensity * 3.0,
+        brightness
+      });
+
+      globalHue = (globalHue + 22 + intensity * 88) % 360;
+    }
+
+    function drawLoop(L) {
+      const segments = 260;
+      const twoPI = Math.PI * 2;
+      let px = null, py = null;
+
+      const b = L.brightness || 0;
+
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const theta = t * twoPI;
+
+        const wobble = 1 + L.amp * Math.sin(theta * L.freq + L.phase);
+        const r = L.radius * wobble;
+
+        const x = L.x + r * Math.cos(theta);
+        const y = L.y + r * Math.sin(theta);
+
+        if (px !== null) {
+          const hue = (L.hueBase + t * 360) % 360;
+          const baseLight = 45 + 25 * L.amp * 4;
+
+          const sat = Math.max(0, 100 - b * 100);
+          const light = baseLight + b * (100 - baseLight);
+
+          ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${L.alpha})`;
+          ctx.lineWidth = L.thickness;
+
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+
+        px = x;
+        py = y;
+      }
+    }
+
+    function updateAndDrawSnakes(dt) {
+      for (let i = loops.length - 1; i >= 0; i--) {
+        const L = loops[i];
+        L.radius += L.growth * dt;
+        L.phase  += L.phaseSpeed * dt;
+        L.alpha  *= 0.978;
+
+        if (L.alpha < 0.02 || L.radius > Math.max(width, height) * 2) {
+          loops.splice(i, 1);
+          continue;
+        }
+        drawLoop(L);
+      }
+    }
+
+    // ---------- Vortex Fields ----------
+    function spawnVortex(energy) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+
+      const strength = 0.6 + audioReactivity * energy * 2.5;
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      const maxR = Math.min(width, height) * (0.25 + 0.25 * Math.random());
+      const b = rainbowBrightnessMax * Math.random();
+
+      vortices.push({
+        x,
+        y,
+        radius: 20,
+        maxRadius: maxR,
+        growth: 40 + strength * 120,
+        twist: 4 + strength * 10,
+        dir,
+        phase: Math.random() * Math.PI * 2,
+        phaseSpeed: (0.4 + strength * 2.2) * dir,
+        hueBase: (globalHue + Math.random() * 180) % 360,
+        alpha: 0.5 + energy * 0.4,
+        thickness: 0.7 + strength * 1.8,
+        brightness: b
+      });
+
+      globalHue = (globalHue + 40 + strength * 80) % 360;
+    }
+
+    function drawVortex(V) {
+      const arms = Math.max(3, Math.round(maxComplexity / 2));
+      const steps = 40;
+      const twoPI = Math.PI * 2;
+      const b = V.brightness || 0;
+
+      const baseLight = 65;
+      const sat = Math.max(0, 100 - b * 100);
+      const light = baseLight + b * (100 - baseLight);
+
+      ctx.lineWidth = V.thickness;
+
+      for (let a = 0; a < arms; a++) {
+        const baseAngle = (a / arms) * twoPI;
+        let px = null, py = null;
+
+        for (let s = 0; s <= steps; s++) {
+          const f = s / steps;
+          const r = V.radius * (0.1 + 0.9 * f);
+          const angle = baseAngle + V.twist * f + V.phase;
+
+          const x = V.x + r * Math.cos(angle);
+          const y = V.y + r * Math.sin(angle);
+
+          if (px !== null) {
+            const hue = (V.hueBase + f * 360) % 360;
+            ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${V.alpha})`;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+
+          px = x;
+          py = y;
+        }
+      }
+    }
+
+    function updateAndDrawVortices(dt) {
+      for (let i = vortices.length - 1; i >= 0; i--) {
+        const V = vortices[i];
+
+        V.radius += V.growth * dt;
+        V.phase  += V.phaseSpeed * dt;
+        V.alpha  *= 0.978;
+
+        if (V.alpha < 0.02 || V.radius > V.maxRadius) {
+          vortices.splice(i, 1);
+          continue;
+        }
+
+        drawVortex(V);
+      }
+    }
+
+    // ---------- Ink Plumes ----------
+    function spawnPlume(energy) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+
+      const intensity = 0.3 + audioReactivity * 0.7 * energy;
+      const minDim = Math.min(width, height);
+
+      const baseRadius = 40 + Math.random() * minDim * 0.15;
+      const growth = 30 + intensity * 180;
+
+      const darkness = 0.65 + Math.random() * 0.3;
+      const upward = - (10 + 80 * intensity);
+      const sideways = (Math.random() - 0.5) * 40;
+
+      const layers = 8 + Math.floor(maxComplexity / 4);
+
+      const brightness = rainbowBrightnessMax * Math.random();
+      const colorMode = Math.random() < 0.5 ? "mono" : "rainbow";
+
+      plumes.push({
+        x,
+        y,
+        vx: sideways,
+        vy: upward,
+        radius: baseRadius,
+        growth,
+        alpha: 0.5 + energy * 0.25,
+        darkness,
+        layers,
+        hueBase: (globalHue + Math.random() * 120) % 360,
+        brightness,
+        colorMode,
+        noisePhase: Math.random() * Math.PI * 2
+      });
+
+      globalHue = (globalHue + 25 + intensity * 70) % 360;
+    }
+
+    function drawPlume(P) {
+      const layers = Math.max(4, P.layers);
+      const baseR = P.radius;
+
+      const prevComp = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let i = 0; i < layers; i++) {
+        const f = i / (layers - 1);
+        const r = baseR * (0.2 + 0.9 * f);
+
+        const b = P.brightness || 0;
+        const alphaLayer = P.alpha * Math.pow(1 - f, 1.5) * (0.10 + 0.18 * b);
+        if (alphaLayer < 0.01) continue;
+
+        const wobbleAngle = P.noisePhase + f * 6.28;
+        const wobbleMag   = baseR * 0.08 * (1 - f);
+        const dx = Math.cos(wobbleAngle) * wobbleMag;
+        const dy = Math.sin(wobbleAngle) * wobbleMag;
+
+        let hue, sat, light;
+        if (P.colorMode === "mono") {
+          hue = (P.hueBase + 220) % 360;
+          sat = 20 + b * 35;
+          light = 12 + (1 - P.darkness) * 25 + b * 35;
+        } else {
+          hue = (P.hueBase + f * 140) % 360;
+          sat = 40 + b * 45;
+          light = 18 + (1 - P.darkness) * 30 + b * 40;
+        }
+        if (light > 60) light = 60;
+
+        ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alphaLayer})`;
+        ctx.beginPath();
+        ctx.arc(P.x + dx, P.y + dy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = prevComp;
+    }
+
+    function updateAndDrawPlumes(dt) {
+      for (let i = plumes.length - 1; i >= 0; i--) {
+        const P = plumes[i];
+
+        P.radius += P.growth * dt;
+        P.x += P.vx * dt;
+        P.y += P.vy * dt;
+        P.alpha *= 0.96;
+        P.noisePhase += dt * 0.7;
+
+        if (
+          P.alpha < 0.02 ||
+          P.radius > Math.max(width, height) * 1.8 ||
+          P.y < -Math.max(width, height) * 0.5
+        ) {
+          plumes.splice(i, 1);
+          continue;
+        }
+
+        drawPlume(P);
+      }
+    }
+
+    // ---------- Inward Ink-Worm Rings ----------
+    function spawnRing(energy) {
+      const margin = 50;
+      const cx = width / 2;
+      const cy = height / 2;
+
+      const side = Math.floor(Math.random() * 4);
+      let x, y;
+
+      if (side === 0) { x = -margin;        y = Math.random() * height; }
+      else if (side === 1) { x = width + margin; y = Math.random() * height; }
+      else if (side === 2) { x = Math.random() * width; y = -margin; }
+      else { x = Math.random() * width; y = height + margin; }
+
+      const dx = cx - x;
+      const dy = cy - y;
+      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+
+      const baseSpeed = 320 + energy * 650 * audioReactivity;
+      const vx = (dx / dist) * baseSpeed;
+      const vy = (dy / dist) * baseSpeed;
+
+      const complexityNorm = maxComplexity / 60;
+      const baseBlobRadius = 10 + 20 * complexityNorm;
+      const wiggleStrength = 0.6 + 1.5 * complexityNorm;
+
+      const trailMax = 30 + Math.floor(maxComplexity * 3);
+
+      const brightness = rainbowBrightnessMax * (0.7 + Math.random() * 0.3);
+
+      let alphaStart = 0.78 + energy * 0.15;
+      if (alphaStart > 0.92) alphaStart = 0.92;
+
+      rings.push({
+        x,
+        y,
+        vx,
+        vy,
+        alpha: alphaStart,
+        hueBase: (globalHue + Math.random() * 180) % 360,
+        baseBlobRadius,
+        wiggleStrength,
+        brightness,
+        trail: [],
+        trailMax,
+      });
+
+      globalHue = (globalHue + 30 + energy * 90) % 360;
+    }
+
+    function drawRing(R) {
+      if (R.trail.length < 2) return;
+
+      const prevComp = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = "lighter";
+
+      const n = R.trail.length;
+      for (let i = 0; i < n; i++) {
+        const p = R.trail[i];
+        const t = i / Math.max(1, n - 1);
+        const life = p.life;
+
+        const hue = (R.hueBase + t * 160) % 360;
+        const b = R.brightness || 0.4;
+        const sat = 55 + 35 * b;
+        let light = 24 + 30 * b * (1 - 0.4 * t);
+        if (light > 75) light = 75;
+
+        const r = R.baseBlobRadius * (0.55 + 0.9 * (1 - t)) * (0.6 + 0.4 * life);
+        const alpha = R.alpha * life * (0.18 + 0.22 * (1 - t));
+
+        ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = prevComp;
+    }
+
+    function updateAndDrawRings(dt) {
+      const cx = width / 2;
+      const cy = height / 2;
+
+      for (let i = rings.length - 1; i >= 0; i--) {
+        const R = rings[i];
+
+        const dx = cx - R.x;
+        const dy = cy - R.y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        const dirX = dx / dist;
+        const dirY = dy / dist;
+
+        const wiggleAngle = (Math.random() - 0.5) * R.wiggleStrength;
+        const cosA = Math.cos(wiggleAngle);
+        const sinA = Math.sin(wiggleAngle);
+        const wx = dirX * cosA - dirY * sinA;
+        const wy = dirX * sinA + dirY * cosA;
+
+        const speed = Math.sqrt(R.vx*R.vx + R.vy*R.vy) || 1;
+
+        const follow = 18 * dt;
+        R.vx = R.vx * (1 - follow) + wx * speed * follow;
+        R.vy = R.vy * (1 - follow) + wy * speed * follow;
+
+        R.x += R.vx * dt;
+        R.y += R.vy * dt;
+
+        R.trail.push({ x: R.x, y: R.y, life: 1.0 });
+        if (R.trail.length > R.trailMax) {
+          R.trail.shift();
+        }
+
+        for (let j = 0; j < R.trail.length; j++) {
+          R.trail[j].life *= 0.985;
+        }
+
+        R.alpha *= 0.992;
+
+        const centerDist = Math.sqrt((R.x - cx)**2 + (R.y - cy)**2);
+
+        if (R.alpha < 0.02 || centerDist < 4) {
+          rings.splice(i, 1);
+          continue;
+        }
+
+        drawRing(R);
+      }
+    }
+
+    // ---------- Smoke Rings + Curtains (dual fluid) ----------
+    const MAX_SMOKE_RINGS = 260;
+    const MAX_CURTAINS = 80;
+    let smokeSensitivity = 2.0;
+    let smokeBrightness = 1.6;
+
+    function spawnSmokeRing(band, energy) {
+      const sens = smokeSensitivity;
+      const e = Math.min(1, energy * sens);
+
+      const side = Math.floor(Math.random() * 4);
+      const margin = 120;
+      let x, y, vx, vy;
+
+      const speedBase = 110;
+      const speedBoost = 420 * e;
+      const speed = speedBase + speedBoost;
+
+      let pathLen, lifeBase;
+
+      if (side === 0) {
+        x = -margin;
+        y = Math.random() * height;
+        vx = speed;
+        vy = (Math.random() - 0.5) * speed * 0.35;
+        pathLen = width + 2 * margin;
+      } else if (side === 1) {
+        x = width + margin;
+        y = Math.random() * height;
+        vx = -speed;
+        vy = (Math.random() - 0.5) * speed * 0.35;
+        pathLen = width + 2 * margin;
+      } else if (side === 2) {
+        x = Math.random() * width;
+        y = -margin;
+        vx = (Math.random() - 0.5) * speed * 0.35;
+        vy = speed;
+        pathLen = height + 2 * margin;
+      } else {
+        x = Math.random() * width;
+        y = height + margin;
+        vx = (Math.random() - 0.5) * speed * 0.35;
+        vy = -speed;
+        pathLen = height + 2 * margin;
+      }
+
+      lifeBase = (pathLen / speed) * 1.6;
+
+      const baseOuter = 40 + e * 80;
+      const maxOuter  = baseOuter * (2.0 + Math.random() * 0.5);
+      const thickness = 0.35 + Math.random() * 0.25;
+
+      let baseHue;
+      if (band === "bass") {
+        baseHue = Math.random() < 0.5
+          ? 10 + Math.random() * 45
+          : 315 + Math.random() * 45;
+      } else if (band === "mid") {
+        baseHue = 100 + Math.random() * 80;
+      } else {
+        baseHue = 210 + Math.random() * 90;
+      }
+
+      const hue = (baseHue + globalHue) % 360;
+      const brightness = smokeBrightness;
+
+      smokeRings.push({
+        band,
+        x, y,
+        vx, vy,
+        baseOuter,
+        maxOuter,
+        thickness,
+        created: performance.now() / 1000,
+        life: lifeBase * (0.9 + Math.random() * 0.2),
+        hue,
+        sat: 96,
+        lightBase: 50 + (brightness - 1) * 18
+      });
+
+      if (smokeRings.length > MAX_SMOKE_RINGS) {
+        smokeRings.splice(0, smokeRings.length - MAX_SMOKE_RINGS);
+      }
+    }
+
+    function updateAndDrawSmokeRings(dt) {
+      const now = performance.now() / 1000;
+
+      for (let i = smokeRings.length - 1; i >= 0; i--) {
+        const r = smokeRings[i];
+        const age = now - r.created;
+        const t = age / r.life;
+
+        if (t >= 1 ||
+            r.x < -400 || r.x > width + 400 ||
+            r.y < -400 || r.y > height + 400) {
+          smokeRings.splice(i, 1);
+          continue;
+        }
+
+        r.x += r.vx * dt;
+        r.y += r.vy * dt;
+
+        const ease = 1 - Math.pow(1 - t, 3);
+        const outerRadius = r.baseOuter + (r.maxOuter - r.baseOuter) * ease;
+        const innerRadius = outerRadius * (1 - r.thickness);
+
+        const brightness = smokeBrightness;
+
+        const alpha = (1 - t) * 0.95;
+        const innerLight = Math.min(96, r.lightBase + 18 * brightness);
+        const midLight   = r.lightBase;
+        const outerLight = Math.max(10, r.lightBase - 20);
+
+        const gradSurf = surfCtx.createRadialGradient(
+          r.x, r.y, innerRadius * 0.35,
+          r.x, r.y, outerRadius
+        );
+
+        gradSurf.addColorStop(0.0, `hsla(${r.hue}, ${r.sat}%, ${innerLight}%, ${alpha})`);
+        gradSurf.addColorStop(0.35,`hsla(${r.hue}, ${r.sat}%, ${midLight}%, ${alpha * 0.95})`);
+        gradSurf.addColorStop(0.7, `hsla(${r.hue}, ${r.sat}%, ${midLight}%, ${alpha * 0.6})`);
+        gradSurf.addColorStop(1.0, `hsla(${r.hue}, ${r.sat}%, ${outerLight}%, 0)`);
+
+        surfCtx.fillStyle = gradSurf;
+        surfCtx.beginPath();
+        surfCtx.arc(r.x, r.y, outerRadius, 0, Math.PI * 2);
+        surfCtx.fill();
+
+        if (r.band === "bass") {
+          const deepAlpha = alpha * 0.7;
+
+          const gradDeep = deepCtx.createRadialGradient(
+            r.x, r.y, innerRadius * 0.5,
+            r.x, r.y, outerRadius * 1.25
+          );
+
+          gradDeep.addColorStop(0.0, `hsla(${r.hue}, ${r.sat}%, ${midLight}%, 0)`);
+          gradDeep.addColorStop(0.45,`hsla(${r.hue}, ${r.sat}%, ${midLight}%, ${deepAlpha})`);
+          gradDeep.addColorStop(1.0, `hsla(${r.hue}, ${r.sat}%, ${outerLight}%, 0)`);
+
+          deepCtx.fillStyle = gradDeep;
+          deepCtx.beginPath();
+          deepCtx.arc(r.x, r.y, outerRadius * 1.25, 0, Math.PI * 2);
+          deepCtx.fill();
+        }
+      }
+    }
+
+    function spawnCurtain(band, energy) {
+      const sens = smokeSensitivity;
+      const e = Math.min(1, energy * sens);
+      if (e <= 0.02) return;
+
+      const side = Math.random() < 0.5 ? "left" : "right";
+      const y = Math.random() * height;
+      const heightCurt = 140 + Math.random() * 260;
+      const widthCurt  = width * (0.7 + Math.random() * 0.7);
+
+      let x, vx;
+      const speed = 25 + 150 * e;
+      if (side === "left") {
+        x = -widthCurt;
+        vx = speed;
+      } else {
+        x = width + widthCurt;
+        vx = -speed;
+      }
+
+      let baseHue;
+      if (band === "mid") {
+        baseHue = 100 + Math.random() * 80;
+      } else {
+        baseHue = 210 + Math.random() * 90;
+      }
+      const hue = (baseHue + globalHue) % 360;
+      const brightness = smokeBrightness;
+
+      curtains.push({
+        band,
+        x,
+        y,
+        vx,
+        width: widthCurt,
+        height: heightCurt,
+        created: performance.now() / 1000,
+        life: 3.5 + Math.random() * 4.5,
+        hue,
+        sat: 90,
+        lightBase: 50 + (brightness - 1) * 14,
+        wobblePhase: Math.random() * Math.PI * 2
+      });
+
+      if (curtains.length > MAX_CURTAINS) {
+        curtains.splice(0, curtains.length - MAX_CURTAINS);
+      }
+    }
+
+    function updateAndDrawCurtains(dt) {
+      const now = performance.now() / 1000;
+
+      for (let i = curtains.length - 1; i >= 0; i--) {
+        const c = curtains[i];
+        const age = now - c.created;
+        const t = age / c.life;
+
+        if (t >= 1 ||
+            c.x + c.width < -200 ||
+            c.x > width + 200) {
+          curtains.splice(i, 1);
+          continue;
+        }
+
+        c.x += c.vx * dt;
+
+        const wobble = Math.sin(now * 0.4 + c.wobblePhase) * 50;
+        const yCenter = c.y + wobble;
+
+        const brightness = smokeBrightness;
+
+        const alpha = (1 - t) * 0.65;
+        const innerLight = Math.min(96, c.lightBase + 16 * brightness);
+        const outerLight = Math.max(8, c.lightBase - 18);
+
+        const xStart = c.x;
+        const xEnd   = c.x + c.width;
+
+        const grad = surfCtx.createLinearGradient(xStart, yCenter, xEnd, yCenter);
+        grad.addColorStop(0.0, `hsla(${c.hue}, ${c.sat}%, ${outerLight}%, 0)`);
+        grad.addColorStop(0.25,`hsla(${c.hue}, ${c.sat}%, ${innerLight}%, ${alpha * 0.6})`);
+        grad.addColorStop(0.7, `hsla(${c.hue}, ${c.sat}%, ${innerLight}%, ${alpha})`);
+        grad.addColorStop(1.0, `hsla(${c.hue}, ${c.sat}%, ${outerLight}%, 0)`);
+
+        surfCtx.fillStyle = grad;
+        surfCtx.beginPath();
+        surfCtx.rect(
+          xStart,
+          yCenter - c.height / 2,
+          c.width,
+          c.height
+        );
+        surfCtx.fill();
+      }
+    }
+
+    function runSmokeFluid(dt, bass, mid, high) {
+      smokeBrightness = 0.4 + rainbowBrightnessMax * (3.0 - 0.4);
+      smokeSensitivity = 0.5; // fixed low sensitivity for this effect
+
+      const sens = smokeSensitivity;
+      const avgEnergy = (bass + mid + high) / 3 * sens;
+
+      deepCtx.globalAlpha = 1;
+      deepCtx.fillStyle = "rgba(0,0,0,0.015)";
+      deepCtx.fillRect(0, 0, width, height);
+
+      surfCtx.globalAlpha = 1;
+      surfCtx.fillStyle = "rgba(0,0,0,0.03)";
+      surfCtx.fillRect(0, 0, width, height);
+
+      function spawnBand(name, val, gain) {
+        const e = val * sens;
+        if (e <= 0.001) return;
+        let spawnFloat = e * gain;
+        let count = Math.floor(spawnFloat);
+        if (Math.random() < (spawnFloat - count)) count++;
+        for (let i = 0; i < count; i++) {
+          spawnSmokeRing(name, val);
+        }
+      }
+
+      spawnBand("bass", bass, 7.5);
+      spawnBand("mid",  mid,  5.5);
+      spawnBand("high", high, 4.5);
+
+      function spawnCurtainBand(name, val, gain) {
+        const e = val * sens;
+        if (e <= 0.01) return;
+        let spawnFloat = e * gain;
+        let count = Math.floor(spawnFloat);
+        if (Math.random() < (spawnFloat - count)) count++;
+        for (let i = 0; i < count; i++) {
+          spawnCurtain(name, val);
+        }
+      }
+
+      spawnCurtainBand("mid",  mid,  3.0);
+      spawnCurtainBand("high", high, 2.2);
+
+      updateAndDrawCurtains(dt);
+      updateAndDrawSmokeRings(dt);
+
+      deepPhase += dt * 0.15;
+      const deepScale = 1.002 + 0.012 * Math.sin(deepPhase + avgEnergy * 3);
+
+      deepTempCtx.clearRect(0, 0, width, height);
+      deepTempCtx.drawImage(deepCanvas, 0, 0);
+      deepCtx.save();
+      deepCtx.setTransform(
+        deepScale, 0, 0, deepScale,
+        width * (1 - deepScale) / 2,
+        height * (1 - deepScale) / 2
+      );
+      deepCtx.clearRect(0, 0, width, height);
+      deepCtx.globalAlpha = 0.99;
+      deepCtx.drawImage(deepTempCanvas, 0, 0);
+      deepCtx.restore();
+      deepCtx.setTransform(1,0,0,1,0,0);
+
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "rgba(0,0,0,0.9)";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(deepCanvas, 0, 0);
+      ctx.drawImage(surfCanvas, 0, 0);
+
+      globalHue = (globalHue + 0.10) % 360;
+    }
+
+    function seedSmokeDemo() {
+      for (let i = 0; i < 10; i++) {
+        spawnSmokeRing("bass", 0.4 + Math.random() * 0.3);
+        spawnSmokeRing("mid",  0.3 + Math.random() * 0.4);
+        spawnSmokeRing("high", 0.3 + Math.random() * 0.4);
+      }
+      for (let i = 0; i < 6; i++) {
+        spawnCurtain("mid",  0.4 + Math.random() * 0.3);
+        spawnCurtain("high", 0.4 + Math.random() * 0.3);
+      }
+    }
+
+    // ---------- Kelvin–Helmholtz Vortex Street (5 layers) ----------
+    function initKHVortexStreet() {
+      khVortices.length = 0;
+      khParticles.length = 0;
+
+      const spacingX = 80;
+      const rows = 5;
+      const rowOffsets = [-0.35, -0.175, 0, 0.175, 0.35];
+
+      for (let r = 0; r < rows; r++) {
+        const yCenter = height * (0.5 + rowOffsets[r]);
+        let sign = (r % 2 === 0) ? 1 : -1;
+        for (let x = -width; x < width * 1.6; x += spacingX) {
+          khVortices.push({
+            x,
+            y0: yCenter,
+            offsetAmp: 25,
+            sign,
+            radius: 40,
+            strength: 1.0,
+            rowIndex: r
+          });
+          sign *= -1;
+        }
+      }
+    }
+
+    function spawnKHParticles(energy, boostFactor = 0) {
+      if (!khVortices.length) return;
+      const base = 2 + energy * 16 * audioReactivity + boostFactor;
+      const count = Math.floor(base);
+      for (let i = 0; i < count; i++) {
+        const v = khVortices[Math.floor(Math.random() * khVortices.length)];
+        const r = v.radius * (0.2 + Math.random() * 0.4);
+        const angle = Math.random() * Math.PI * 2;
+        const px = v.x + Math.cos(angle) * r;
+        const py = v.y0 + Math.sin(angle) * r;
+
+        khParticles.push({
+          x: px,
+          y: py,
+          life: 1.0,
+          size: 3 + Math.random() * 4,
+          hueOffset: Math.random() * 60,
+          alpha: 0.9,
+        });
+      }
+    }
+
+    function updateAndDrawKHVortexStreet(dt, energy) {
+      if (!khVortices.length) initKHVortexStreet();
+
+      const baseFlow = 40 + 260 * (0.3 + audioReactivity * 0.5 * energy);
+      const swirlBase = 22000 * (0.4 + audioReactivity * 0.8);
+      const waveSpeed = 0.4 + 0.7 * audioReactivity;
+      const baseOffsetAmp = 20 + 40 * energy;
+
+      khPhase += dt * waveSpeed;
+
+      const rowMin = {};
+      const rowMax = {};
+
+      for (const v of khVortices) {
+        v.x += baseFlow * dt;
+        v.offsetAmp = baseOffsetAmp * (1 + v.rowIndex * 0.08);
+        v.strength = 0.8 + energy * 1.4;
+
+        const phase = khPhase + v.x * 0.0015 * v.sign + v.rowIndex * 0.7;
+        v.y = v.y0 + Math.sin(phase) * v.offsetAmp;
+
+        if (!(v.rowIndex in rowMin) || v.x < rowMin[v.rowIndex]) rowMin[v.rowIndex] = v.x;
+        if (!(v.rowIndex in rowMax) || v.x > rowMax[v.rowIndex]) rowMax[v.rowIndex] = v.x;
+      }
+
+      const spacingX = 80;
+      for (const v of khVortices) {
+        const minX = rowMin[v.rowIndex];
+        if (v.x - v.radius > width + 120) {
+          v.x = minX - spacingX;
+          if (Math.random() < 0.4) v.sign *= -1;
+        }
+      }
+
+      spawnKHParticles(energy);
+
+      const prevComp = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let i = khParticles.length - 1; i >= 0; i--) {
+        const p = khParticles[i];
+
+        let vx = baseFlow;
+        let vy = 0;
+
+        for (const v of khVortices) {
+          const dx = p.x - v.x;
+          const dy = p.y - v.y;
+          const distSq = dx*dx + dy*dy + 80;
+          const inv = 1 / distSq;
+          const strength = swirlBase * v.sign * v.strength * inv;
+
+          vx += -dy * strength;
+          vy +=  dx * strength;
+        }
+
+        p.x += vx * dt;
+        p.y += vy * dt;
+
+        p.x += (Math.random() - 0.5) * 10 * dt;
+        p.y += (Math.random() - 0.5) * 10 * dt;
+
+        p.life *= 0.985;
+        p.alpha *= 0.985;
+
+        if (p.life < 0.08 ||
+            p.x < -150 || p.x > width + 150 ||
+            p.y < -150 || p.y > height + 150) {
+          khParticles.splice(i, 1);
+          continue;
+        }
+
+        const t = 1 - p.life;
+        const hue = (globalHue + p.hueOffset + t * 120) % 360;
+        const sat = 65 + 25 * rainbowBrightnessMax;
+        let light = 40 + 25 * rainbowBrightnessMax + 10 * t;
+        if (light > 80) light = 80;
+
+        ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${p.alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (0.5 + 0.6 * p.life), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Vortex cores – now also cycling across rainbow via khPhase
+      for (const v of khVortices) {
+        const signColorShift = v.sign > 0 ? 0 : 180;
+        const rowShift = v.rowIndex === 0 ? -40 : (v.rowIndex === 4 ? 40 : (v.rowIndex === 1 ? -20 : (v.rowIndex === 3 ? 20 : 0)));
+        const hue = (globalHue + signColorShift + rowShift + khPhase * 40) % 360;
+        const sat = 70 + 20 * rainbowBrightnessMax;
+        const light = 45 + 20 * rainbowBrightnessMax;
+
+        const rInner = v.radius * 0.4;
+        const rOuter = v.radius * 0.9;
+
+        const grad = ctx.createRadialGradient(
+          v.x, v.y, rInner * 0.1,
+          v.x, v.y, rOuter
+        );
+        grad.addColorStop(0.0, `hsla(${hue}, ${sat}%, ${light + 15}%, 0.8)`);
+        grad.addColorStop(0.4, `hsla(${hue}, ${sat}%, ${light}%, 0.6)`);
+        grad.addColorStop(1.0, `hsla(${hue}, ${sat}%, ${light - 20}%, 0)`);
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(v.x, v.y, rOuter, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = prevComp;
+
+      globalHue = (globalHue + 0.05 + energy * 0.1) % 360;
+    }
+
+    // ---------- Main loop ----------
+    let lastTime = performance.now();
+
+    function frame(now) {
+      const t  = now / 1000;
+      let dt = (now - lastTime) / 1000;
+      if (dt > 0.05) dt = 0.05;
+      lastTime = now;
+
+      const { energy, rms, silent, bass, mid, high } = getAudioMetrics(t);
+
+      const beat = detectBeat(t, rms, silent);
+
+      // Time-based auto cycle: every 60 seconds
+      const sinceEffectChange = t - lastEffectChangeTime;
+      if (autoCycleEnabled && sinceEffectChange > cycleInterval) {
+        const currentIndex = effectOrder.indexOf(currentEffect);
+        const nextIndex = (currentIndex + 1) % effectOrder.length;
+        setEffect(effectOrder[nextIndex]);
+      }
+
+      if (currentEffect === "smokeFluid") {
+        runSmokeFluid(dt, bass, mid, high);
+      } else {
+        ctx.fillStyle = `rgba(0,0,0,${1 - fadeSpeed})`;
+        ctx.fillRect(0, 0, width, height);
+
+        if (beat) {
+          if (currentEffect === "snakes") {
+            spawnLoop(energy);
+          } else if (currentEffect === "vortex") {
+            spawnVortex(energy);
+          } else if (currentEffect === "ink") {
+            const count = 6 + Math.floor(energy * 6);
+            for (let i = 0; i < count; i++) spawnPlume(energy);
+          } else if (currentEffect === "snakesInk") {
+            spawnLoop(energy);
+            const count = 5 + Math.floor(energy * 5);
+            for (let i = 0; i < count; i++) spawnPlume(energy);
+          } else if (currentEffect === "rings") {
+            if (rings.length < 260) {
+              const baseCount = 8;
+              const extra = Math.floor(energy * 5);
+              const count = baseCount + extra;
+              for (let k = 0; k < count; k++) {
+                spawnRing(energy);
+              }
+            }
+          } else if (currentEffect === "khStreet") {
+            spawnKHParticles(energy, 6);
+          }
+        }
+
+        if (currentEffect === "snakes") {
+          updateAndDrawSnakes(dt);
+        } else if (currentEffect === "vortex") {
+          updateAndDrawVortices(dt);
+        } else if (currentEffect === "ink") {
+          updateAndDrawPlumes(dt);
+
+          ctx.globalCompositeOperation = "multiply";
+          ctx.fillStyle = "rgba(0,0,0,0.18)";
+          ctx.fillRect(0, 0, width, height);
+          ctx.globalCompositeOperation = "source-over";
+
+        } else if (currentEffect === "snakesInk") {
+          updateAndDrawPlumes(dt);
+
+          ctx.globalCompositeOperation = "multiply";
+          ctx.fillStyle = "rgba(0,0,0,0.18)";
+          ctx.fillRect(0, 0, width, height);
+          ctx.globalCompositeOperation = "source-over";
+
+          updateAndDrawSnakes(dt);
+        } else if (currentEffect === "rings") {
+          updateAndDrawRings(dt);
+        } else if (currentEffect === "khStreet") {
+          updateAndDrawKHVortexStreet(dt, energy);
+        }
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, width, height);
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
